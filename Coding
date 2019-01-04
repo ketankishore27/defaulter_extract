@@ -1,0 +1,218 @@
+# ----------------------> Importing the required Libraries ---------------------------------
+import win32com.client
+import re
+import pandas as pd
+import datetime
+import os
+
+# ----------------------> Connecting to Outlook --------------------------------------------
+
+outlook = win32com.client.gencache.EnsureDispatch('Outlook.Application').GetNamespace('MAPI')
+
+# ----------------------> Getting to the Folder -------------------------------------------
+
+present_time = datetime.datetime.now()
+present_month = present_time.month
+
+path = ************************   # Setting the current folder as working directory
+
+if os.path.exists(path):
+    pass
+else:
+    os.mkdir(path)
+    
+os.chdir(path)
+
+# ----------------------> Going to the Timesheet folder -------------------------------------
+folder = outlook.GetDefaultFolder(6)
+subfolder = folder.Folders[3]
+
+# ----------------------> Retrieving/Scraping the Data  -------------------------------------
+
+messages = subfolder.Items
+
+final1 = []
+final = []
+
+for i in messages:
+    time = datetime.datetime.fromtimestamp((i.ReceivedTime).timestamp())
+    if time + datetime.timedelta(days = 7) > present_time:
+
+## *** Message Body *************
+        
+        a = i.Body
+        
+## *** Finding the Employee ID **
+        pattern1 = re.compile(r'[0-9]+_FS')
+        y = re.findall(pattern1, a)[0]
+        
+## *** Finding the Name of the Employee **
+        
+        pattern2 = re.compile(r'[A-Z]+\, +[A-Z]+\. +[A-Z]+')
+        z = re.findall(pattern2, a)[0]
+    
+## *** Finding the Dates for Defaulter ** 
+        
+        pattern3 = re.compile(r'[0-9]+-+[A-Za-z]+-+[0-9]+')
+        x = ', '.join(re.findall(pattern3, a))
+        
+## *** Checking for Status ***
+        
+        
+        if (a.find('NOT ENTERED') != -1) and (a.find('SUBMITTED') != -1) and (a.find('RETURNED') != -1):
+            w = 'NOT ENTERED, SUBMITTED, RETURNED'
+        elif (a.find('NOT ENTERED') != -1) and (a.find('SUBMITTED') != -1):
+            w = 'NOT ENTERED, SUBMITTED'
+        elif (a.find('NOT ENTERED') != -1) and (a.find('RETURNED') != -1):
+            w = 'NOT ENTERED, RETURNED'
+        elif (a.find('SUBMITTED') != -1) and (a.find('RETURNED') != -1):
+            w = 'SUBMITTED, RETURNED'
+        elif a.find('NOT ENTERED') != -1:
+            w = 'NOT ENTERED'
+        elif a.find('SUBMITTED') != -1:
+            w = 'SUBMITTED'
+        elif a.find('RETURNED') != -1:
+            w = 'RETURNED'
+        else:
+            w = ' '
+    
+## *** Appending the data to a final list***
+    
+        final.append([y, z, w, x])
+        
+# -------------------> Inserting a Blank Line at the end --------------------------------
+  
+y, z, w, x = ' ', ' ', ' ', ' '     
+final.append([y, z, w, x])
+    
+# -------------------> Converting the List to a dataframe --------------------------------
+
+sample = pd.DataFrame(data = final, columns = ['Employee Number', 'Employee Name', 'Final Status', 'Date'])
+
+# -------------------> Dropping duplicates and Resetting the Index -----------------------
+
+sample.drop_duplicates(inplace = True)
+sample.set_index('Employee Number', inplace = True)
+
+# -------------------> Making the Excel from the Dataframe  ------------------------------
+
+s = str(datetime.datetime.utcnow().date())
+title = 'Defaulters List on ' + s + '.xlsx'
+
+writer = pd.ExcelWriter(title, engine='xlsxwriter')
+
+sample.to_excel(writer, 'Defaulters')
+
+workbook = writer.book
+worksheet = writer.sheets['Defaulters']
+wrap_format = workbook.add_format({'text_wrap' : True})
+
+worksheet.set_column('A:A', 30, wrap_format)
+worksheet.set_column('B:B', 50, wrap_format)
+worksheet.set_column('C:C', 50, wrap_format)
+worksheet.set_column('D:D', 50, wrap_format)
+
+writer.save()
+writer.close()
+
+# -------------------> Checking if it is the last run of the month ---------------------------------------------------
+if (present_time + datetime.timedelta(days = 7)).month != present_month:
+    
+    import glob
+    
+    dataset = pd.DataFrame(columns = ['Employee Number', 'Employee Name', 'Final Status', 'Date'])
+    
+    for i in glob.glob('*.xlsx'):
+        dataset_temp = pd.read_excel(i)
+        dataset = pd.concat([dataset, dataset_temp])
+
+## *** Making the Excelsheet by concatenation ***
+        
+    title_monthly = 'Defaulters List for the present month.xlsx'
+    
+    writer = pd.ExcelWriter(title_monthly, engine='xlsxwriter')
+    
+    sample.to_excel(writer, 'Defaulters')
+    
+    workbook = writer.book
+    worksheet = writer.sheets['Defaulters']
+    wrap_format = workbook.add_format({'text_wrap' : True})
+    
+    worksheet.set_column('A:A', 30, wrap_format)
+    worksheet.set_column('B:B', 50, wrap_format)
+    worksheet.set_column('C:C', 50, wrap_format)
+    worksheet.set_column('D:D', 50, wrap_format)
+    
+    writer.save()
+    writer.close()
+
+    
+## *** Sending the Mail at the Last week of the month ***
+    
+    outlook = win32com.client.gencache.EnsureDispatch('Outlook.Application')
+    to_id = ['****************@*********.com', '**************@**************.com']
+    
+    for i in to_id:
+        mail = outlook.CreateItem(0)
+        mail.To = i
+        mail.Subject = 'Defaulter List for the Month'
+        mail.Body = """
+        
+        Hi,
+        
+            
+        Please find the Defaulter status for the past Month
+        
+            
+        This is an automated mail so Please let me know in case of any concern.
+            
+        
+        
+        Regards,
+        ______________________________________________
+        Ketan Kishore
+
+        """
+        
+        # To attach a file to the email (optional):
+        
+        attachment_path = os.path.join(os.getcwd(), title_monthly)
+        attachment  = attachment_path
+        mail.Attachments.Add(attachment)
+        mail.Send()
+
+# -------------> If it is not the end of the month, sending the general report -----------------
+        
+else:
+    input('Sending the general report')
+    outlook = win32com.client.gencache.EnsureDispatch('Outlook.Application')
+    to_id = ['****************@*********.com', '**************@**************.com']
+    
+    for i in to_id:
+        mail = outlook.CreateItem(0)
+        mail.To = i
+        mail.Subject = 'Defaulter List for the Week'
+        mail.Body = """
+        
+        Hi,
+        
+            
+        Please find the Defaulter status for the past week
+        
+            
+        This is an automated mail so Please let me know in case of any concern.
+            
+        
+        
+        Regards,
+        ______________________________________________
+        Ketan Kishore
+        
+        """
+        
+        # To attach a file to the email (optional):
+        
+        attachment_path_weekly = os.path.join(path, title)
+        attachment_weekly  = attachment_path_weekly
+        mail.Attachments.Add(attachment_weekly)
+        mail.Send()
